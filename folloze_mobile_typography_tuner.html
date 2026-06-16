@@ -275,11 +275,32 @@ function mqBody(text,startIdx){
   return null;
 }
 let __lastParseCount=0;
+let __factorPrefix="fz-";
+function factorVar(row,prop){return "--"+__factorPrefix+row.key+"-"+prop+"-factor";}
+function readFactorsFrom(body,f,bp){
+  let n=0;
+  ROWS.forEach(r=>{
+    Object.keys(PROPS).forEach(prop=>{
+      const mm=body.match(new RegExp(factorVar(r,prop).replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\s*:\\s*([0-9.]+)"));
+      if(mm){f[bp][r.key][prop]=parseFloat(mm[1]);n++;}
+    });
+  });
+  return n;
+}
+function detectFactorPrefix(text){
+  if(/--edit-fz-heading-1-font-size-factor/.test(text)) return "edit-fz-";
+  return "fz-";
+}
+function rootHostBody(text){
+  const m=text.match(/:root[^{]*\{/);
+  if(!m)return null;
+  return mqBody(text,m.index+m[0].length-1);
+}
 function parseFactors(text){
   const f=emptyFactors();
+  __factorPrefix=detectFactorPrefix(text);
   let found=0;
-  // locate every @media ... (min|max)-width: Npx ... block, brace-balanced
-  const headRe=/@media[^{]*?\((min|max)-width:\s*(\d+)px\)[^{]*/g;
+  const headRe=/@media[^{]*?\((min|max)-width:\s*(\d+)px\)[^{]*/gi;
   let m;
   while((m=headRe.exec(text))!==null){
     const w=m[2];let bp=null;
@@ -289,21 +310,32 @@ function parseFactors(text){
     if(!bp)continue;
     const body=mqBody(text,headRe.lastIndex);
     if(body===null)continue;
-    ROWS.forEach(r=>{
-      Object.keys(PROPS).forEach(prop=>{
-        const mm=body.match(new RegExp("--fz-"+r.key+"-"+prop+"-factor\\s*:\\s*([0-9.]+)"));
-        if(mm){f[bp][r.key][prop]=parseFloat(mm[1]);found++;}
-      });
-    });
+    found+=readFactorsFrom(body,f,bp);
+  }
+  if(found===0){
+    const root=rootHostBody(text);
+    if(root){
+      const tmp=emptyFactors();
+      const n=readFactorsFrom(root,tmp,"640");
+      if(n>0){
+        BPS.forEach(bp=>{
+          ROWS.forEach(r=>{
+            Object.keys(PROPS).forEach(p=>{ f[bp][r.key][p]=tmp["640"][r.key][p]; });
+          });
+        });
+        found=n;
+      }
+    }
   }
   __lastParseCount=found;
   return f;
 }
 function parseFamilies(text){
   const fam={};
+  const p=__factorPrefix||"fz-";
   ROWS.forEach(r=>{
     fam[r.key]=r.fam;
-    const mm=text.match(new RegExp("--fz-"+r.key+"-font-family:\\s*var\\(--fz-font-family-(\\d)\\)"));
+    const mm=text.match(new RegExp("--"+p.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+r.key+"-font-family:\\s*var\\(--"+p.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"font-family-(\\d)\\)"));
     if(mm) fam[r.key]=parseInt(mm[1]);
   });
   return fam;
@@ -497,7 +529,8 @@ function buildOutput(){
     let body=out.slice(e.start,e.end);
     ROWS.forEach(row=>{
       Object.keys(PROPS).forEach(prop=>{
-        body=body.replace(new RegExp("(--fz-"+row.key+"-"+prop+"-factor\\s*:\\s*)([0-9.]+)"),"$1"+factors[e.bp][row.key][prop]);
+        const v=factorVar(row,prop).replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+        body=body.replace(new RegExp("("+v+"\\s*:\\s*)([0-9.]+)"),"$1"+factors[e.bp][row.key][prop]);
       });
     });
     out=out.slice(0,e.start)+body+out.slice(e.end);
@@ -513,7 +546,13 @@ function loadCss(text,label){
   if(__lastParseCount===0 && text!==EMBEDDED){
     lbl.textContent=label+" — no font factors found";
     lbl.style.color="#b45309";
-    showBanner("warn","Could not read font-size factors from this file. Paste the full theme.css from Folloze — it must include the three @media blocks at the bottom (640px, 1024px, 1536px).");
+    const hasMedia=/@media/i.test(text);
+    const hasFz=/--(?:edit-)?fz-heading-1-font-size-factor/i.test(text);
+    let hint="This file is missing Folloze typography variables.";
+    if(!hasFz) hint="This doesn't look like a Folloze theme.css — it has no --fz-heading-1-font-size-factor variables.";
+    else if(!hasMedia) hint="Found typography variables but no @media blocks. Export the full theme.css from Folloze (not a snippet).";
+    else hint="Found @media rules but not the typography factor variables inside them. Paste the complete theme.css file.";
+    showBanner("warn",hint);
   }else{
     lbl.textContent=label+(text!==EMBEDDED?" ("+__lastParseCount+" factors read)":"");
     lbl.style.color="var(--ink-4)";
