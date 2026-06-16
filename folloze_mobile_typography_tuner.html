@@ -30,6 +30,12 @@
   button.tb:hover{border-color:#d6d8e0; background:#fcfcfd;}
   button.tb .ic{width:15px; height:15px; stroke:currentColor; stroke-width:1.8; fill:none; stroke-linecap:round; stroke-linejoin:round;}
   .src{font-size:12.5px; color:var(--ink-4); margin-left:4px;}
+  .load-banner{display:none; margin:0 0 18px; padding:12px 16px; border-radius:var(--radius-s); font-size:13.5px; font-weight:500; line-height:1.45;}
+  .load-banner.show{display:block;}
+  .load-banner.ok{color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0;}
+  .load-banner.warn{color:#92400e; background:#fffbeb; border:1px solid #fcd34d;}
+  .load-banner.err{color:#991b1b; background:#fef2f2; border:1px solid #fca5a5;}
+  .paste-err{font-size:12.5px; color:#b45309; margin:0 0 10px; min-height:18px;}
 
   .grid{display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:40px; align-items:start; margin-top:26px;}
   @media(max-width:1024px){ .grid{grid-template-columns:1fr;} .panel{position:static!important;} }
@@ -135,6 +141,7 @@
       <span class="src" id="src-label">Using embedded theme</span>
     </div>
   </header>
+  <div class="load-banner" id="load-banner" role="status" aria-live="polite"></div>
   <input type="file" id="file-input" accept=".css,text/css" style="display:none">
 
   <div class="grid">
@@ -191,6 +198,7 @@
   <div class="modal">
     <h3>Paste your theme.css</h3>
     <p>Paste the full file. We read the three media queries and keep everything else exactly as-is.</p>
+    <p class="paste-err" id="paste-err"></p>
     <textarea id="paste-box" placeholder="Paste full theme.css here…"></textarea>
     <div class="modal-actions">
       <button class="ghost" id="btn-cancel-paste">Cancel</button>
@@ -233,7 +241,20 @@ const PROPS={
 };
 
 let cssText=EMBEDDED, factors={}, famMap={}, currentBp="640", currentProp="font-size";
-const $=id=>document.getElementById(id)||{textContent:"",style:{},addEventListener:function(){},querySelectorAll:function(){return[];},classList:{toggle:function(){}},appendChild:function(){},innerHTML:"",value:"",checked:true};
+function $(id){
+  const el=document.getElementById(id);
+  if(!el) throw new Error("Missing #"+id);
+  return el;
+}
+function showBanner(kind,msg){
+  const b=$("load-banner");
+  b.className="load-banner show "+(kind||"ok");
+  b.textContent=msg;
+}
+function hideBanner(){
+  const b=document.getElementById("load-banner");
+  if(b){ b.className="load-banner"; b.textContent=""; }
+}
 const previewNodes=[];
 
 function emptyFactors(){
@@ -490,22 +511,58 @@ function loadCss(text,label){
   famMap=parseFamilies(text);
   const lbl=$("src-label");
   if(__lastParseCount===0 && text!==EMBEDDED){
-    lbl.textContent=label+" — ⚠ no font factors found in this file";
+    lbl.textContent=label+" — no font factors found";
     lbl.style.color="#b45309";
+    showBanner("warn","Could not read font-size factors from this file. Paste the full theme.css from Folloze — it must include the three @media blocks at the bottom (640px, 1024px, 1536px).");
   }else{
     lbl.textContent=label+(text!==EMBEDDED?" ("+__lastParseCount+" factors read)":"");
     lbl.style.color="var(--ink-4)";
+    showBanner("ok",text===EMBEDDED?"Ready — drag the sliders on the right to adjust font sizes.":("Loaded successfully — "+__lastParseCount+" typography factors found. Drag the sliders to preview changes."));
   }
   setBp(currentBp);
 }
 
+function safeLoadCss(text,label){
+  try{
+    loadCss(text,label);
+    return true;
+  }catch(err){
+    console.error("Load CSS failed:",err);
+    showBanner("err","Could not load CSS: "+(err&&err.message||err));
+    const pv=document.getElementById("preview");
+    if(pv) pv.innerHTML='<div style="padding:24px;font-family:sans-serif;font-size:13px;color:#b00;">Could not load CSS: '+(err&&err.message||err)+'</div>';
+    return false;
+  }
+}
+
 $("btn-upload").addEventListener("click",()=>$("file-input").click());
-$("file-input").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>loadCss(ev.target.result,"Loaded: "+f.name);r.readAsText(f);});
-$("btn-paste").addEventListener("click",()=>{$("paste-modal").style.display="flex";});
+$("file-input").addEventListener("change",e=>{
+  const f=e.target.files[0];
+  if(!f)return;
+  showBanner("ok","Reading "+f.name+"…");
+  const r=new FileReader();
+  r.onload=ev=>{
+    if(safeLoadCss(ev.target.result,"Loaded: "+f.name)) e.target.value="";
+  };
+  r.onerror=()=>showBanner("err","Could not read file: "+f.name);
+  r.readAsText(f);
+});
+$("btn-paste").addEventListener("click",()=>{$("paste-err").textContent="";$("paste-modal").style.display="flex";});
 $("btn-cancel-paste").addEventListener("click",()=>{$("paste-modal").style.display="none";});
-$("btn-load-paste").addEventListener("click",()=>{const v=$("paste-box").value.trim();if(v){loadCss(v,"Loaded from pasted CSS");$("paste-modal").style.display="none";$("paste-box").value="";}});
+$("btn-load-paste").addEventListener("click",()=>{
+  const v=$("paste-box").value.trim();
+  const err=$("paste-err");
+  if(!v){ err.textContent="Paste your theme.css above, then click Load CSS."; return; }
+  err.textContent="";
+  if(safeLoadCss(v,"Loaded from pasted CSS")){
+    $("paste-modal").style.display="none";
+    $("paste-box").value="";
+  }else{
+    err.textContent="Load failed — see the message at the top of the page.";
+  }
+});
 $("paste-modal").addEventListener("click",e=>{if(e.target===$("paste-modal"))$("paste-modal").style.display="none";});
-$("btn-reset").addEventListener("click",()=>loadCss(EMBEDDED,"Using embedded theme"));
+$("btn-reset").addEventListener("click",()=>safeLoadCss(EMBEDDED,"Using embedded theme"));
 $("show-tags").addEventListener("change",syncPreview);
 $("bp-toggle").querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>setBp(b.dataset.bp)));
 $("prop-tabs").querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>setProp(b.dataset.prop)));
@@ -523,8 +580,9 @@ $("btn-copy").addEventListener("click",async()=>{
 });
 function flash(msg){$("dl-status").textContent="✓ "+msg;setTimeout(()=>$("dl-status").textContent="",4000);}
 
-try{ loadCss(EMBEDDED,"Using embedded theme"); }
+try{ safeLoadCss(EMBEDDED,"Using embedded theme"); }
 catch(err){
+  showBanner("err","Could not start the tuner: "+(err&&err.message||err));
   var pv=document.getElementById("preview");
   if(pv){ pv.innerHTML='<div style="padding:24px;font-family:sans-serif;font-size:13px;color:#b00;">Could not initialize: '+(err&&err.message||err)+'</div>'; }
   console.error("Tuner init failed:",err);
