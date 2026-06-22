@@ -1470,6 +1470,9 @@ function renderType(pane){
     body.appendChild(colorSelectRow('Color','',prefix+'-color',COLOR_TOKENS));
     body.appendChild(selectRow('Weight','',prefix+'-weight',WEIGHT_TOKENS));
     body.appendChild(selectRow('Font','',prefix+'-font-family',FONT_TOKENS));
+    const fsz=(getVar(prefix+'-font-size')||'').match(/calc\(\s*([\d.]+)rem/);
+    body.appendChild(floatRow('Font size','desktop base', fsz?Math.round(parseFloat(fsz[1])*16):'', 1, 'px',
+      v=>setVar(prefix+'-font-size',`calc(${parseFloat((v/16).toFixed(4))}rem * var(--${prefix}-font-size-factor))`)));
     const lh=(getVar(prefix+'-line-height')||'').match(/calc\(\s*([\d.]+)/);
     body.appendChild(floatRow('Line height','space between lines', lh?lh[1]:'1.5', 0.1, '×',
       v=>setVar(prefix+'-line-height',`calc(${v} * var(--${prefix}-line-height-factor))`)));
